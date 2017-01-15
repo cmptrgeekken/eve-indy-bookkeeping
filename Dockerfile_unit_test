@@ -1,0 +1,9 @@
+FROM python:3.5.2-slim
+
+RUN apt-get update && apt-get install git -qqy
+# add requirements from requirements.txt and all functions here
+
+WORKDIR /home
+
+COPY functions /home/functions
+COPY tests /home/tests
