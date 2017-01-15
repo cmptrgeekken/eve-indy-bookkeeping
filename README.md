@@ -1,4 +1,18 @@
-# headline
+# AWS Python Stack
+
+This project is a skeleton for aws **lambda** functions which are written in Python. Note that aws lambda currently only 
+supports Python 2.7 module, but the function code can be written in Python 3.5.
+
+**WARNING**: This repo has quite a lot of open todos. AS Lambda deployment is not yet explained. 
+If you find this interesting, please star or fork and leave comments/issues for whatever you would like to see.
+
+## TODO
+
+* Add environment settings and triggers to function's readme
+* Add aws requirements to requirements section
+* Explain zappa_settings.json files
+* Explain deployment with zappa
+* Setup integration testing
 
 ## Requirements
 
