@@ -7,3 +7,4 @@ unit_test_coverage:
   build:
     image: unit-test-coverage
     dockerfile_path: Dockerfile_unit_test_coverage
+  encrypted_env_file: coveralls.env.encrypted
