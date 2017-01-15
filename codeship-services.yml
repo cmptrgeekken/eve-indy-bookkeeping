@@ -1,0 +1,9 @@
+unit_test:
+  build:
+    image: unit-test
+    dockerfile_path: Dockerfile_unit_test
+
+unit_test_coverage:
+  build:
+    image: unit-test-coverage
+    dockerfile_path: Dockerfile_unit_test_coverage

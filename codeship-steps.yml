@@ -1,0 +1,8 @@
+- service: unit_test
+  name: test
+  command: "python -m unittest discover"
+
+- service: unit_test_coverage
+  name: test-coverage
+  tag: "master"
+  command: "./test_coverage.sh"

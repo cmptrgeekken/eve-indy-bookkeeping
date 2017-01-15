@@ -6,6 +6,6 @@ RUN pip install coverage coveralls
 
 WORKDIR /home
 
-# test_coverage will check out the master and run a coverage analysis
-COPY test_coverage.sh /home
-RUN chmod +x test_coverage.sh
+# unit_test_coverage will check out the master and run a coverage analysis
+COPY unit_test_coverage.sh /home
+RUN chmod +x unit_test_coverage.sh
