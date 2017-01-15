@@ -5,4 +5,4 @@
 - service: unit_test_coverage
   name: test-coverage
   tag: "master"
-  command: "./test_coverage.sh"
+  command: "./unit_test_coverage.sh"
