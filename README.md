@@ -8,6 +8,7 @@ If you find this interesting, please star or fork and leave comments/issues for 
 
 ## TODO
 
+* Add badges for codeship and coveralls
 * Add environment settings and triggers to function's readme
 * Add aws requirements to requirements section
 * Explain zappa_settings.json files
