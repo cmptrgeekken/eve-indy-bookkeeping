@@ -4,12 +4,12 @@ import xml.etree.ElementTree
 
 
 def lambda_handler(event, context):
-    IndustryJobsHistoryParser().main()
+    IndustryJobsParser().main()
     return "done"
 
 
 # industry jobs include manufacturing, copying and invention
-class IndustryJobsHistoryParser:
+class IndustryJobsParser:
     def main(self):
         apis = self.load_apis()
         api_results = self.get_api_results(apis)
@@ -54,12 +54,17 @@ class IndustryJobsHistoryParser:
         for api in apis:
             verification = "keyID=%d&vCode=%s" % (api['key'], api['vCode'])
             if api['type'] == 'corp':
-                endpoint = "/corp/IndustryJobsHistory.xml.aspx"
+                endpoint = "/corp/IndustryJobs.xml.aspx"
+                history_endpoint = "/corp/IndustryJobsHistory.xml.aspx"
             else:
-                endpoint = "/char/IndustryJobsHistory.xml.aspx"
+                endpoint = "/char/IndustryJobs.xml.aspx"
+                history_endpoint = "/char/IndustryJobsHistory.xml.aspx"
             endpoint_url = base_url + endpoint
             api_url = endpoint_url + "?" + verification
             urls.append({'apiId': api['_id'], 'url': api_url})
+            history_endpoint_url = base_url + history_endpoint
+            history_api_url = history_endpoint_url + "?" + verification
+            urls.append({'apiId': api['_id'], 'url': history_api_url})
 
         return urls
 
