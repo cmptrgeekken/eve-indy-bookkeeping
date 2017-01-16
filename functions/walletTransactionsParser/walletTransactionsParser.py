@@ -88,7 +88,8 @@ class WalletTransactionsParser:
                     'typeId': int(row.get('typeID')),
                     'price': float(row.get('price')),
                     'transactionType': row.get('transactionType'),
-                    'stationId': int(row.get('stationID'))
+                    'stationId': int(row.get('stationID')),
+                    'clientId': int(row.get('clientID'))
                 })
 
         return result
