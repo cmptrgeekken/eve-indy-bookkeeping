@@ -107,7 +107,7 @@ class WalletTransactionsParserTest(unittest.TestCase):
         expected = [{'apiId': 123, 'transactionId': 4505525903,
                      'timestamp': "2017-01-12 13:55:28", 'quantity': 1,
                      'typeName': "Skill Injector", 'typeId': 40520, 'price': 616699000.0,
-                     'transactionType': "buy"}
+                     'transactionType': "buy", 'stationId': 1023123194011}
                     ]
 
         result = self.sut.transform(api_results)
