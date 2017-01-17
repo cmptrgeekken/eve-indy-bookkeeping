@@ -1,7 +1,6 @@
 import unittest
 from unittest import mock
 
-# cache timer: 30 minutes
 from eveapimongo import MongoProvider
 
 from functions.contractsParser.contractsParser import ContractsParser
@@ -27,7 +26,7 @@ class ContractsParserTest(unittest.TestCase):
         load_apis_method = mock.patch.object(self.sut, 'load_apis', return_value="apis").start()
         api_results_method = mock.patch.object(self.sut, 'get_api_results', return_value="apiResults").start()
         transform_method = mock.patch.object(self.sut, 'transform', return_value="transformed").start()
-        delete_updatable_method = mock.patch.object(self.sut, 'delete_updatable_contracts').start()
+        delete_updatable_method = mock.patch.object(self.sut, 'delete_updatable').start()
         filter_method = mock.patch.object(self.sut, 'filter_existing', return_value="filtered").start()
         write_method = mock.patch.object(self.sut, 'write').start()
 
