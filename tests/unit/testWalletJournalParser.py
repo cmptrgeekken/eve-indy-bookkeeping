@@ -134,11 +134,11 @@ class WalletJournalParserTest(unittest.TestCase):
         find_method.assert_called_with('walletJournal', {'journalId': 1})
 
     def test_filter_irrelevant(self):
-        documents = [{'refTypeId': -1}, {'refTypeId': 1}, {'refTypeId': 46}, {'refTypeId': 54}]
+        documents = [{'refTypeId': -1}, {'refTypeId': 1}, {'refTypeId': 10}, {'refTypeId': 37}, {'refTypeId': 46}, {'refTypeId': 54}]
 
         result = self.sut.filter_irrelevant(documents)
 
-        self.assertEqual(len(result), 3)
+        self.assertEqual(len(result), 5)
 
     class MockedCursor:
         def insert_many(self, documents):

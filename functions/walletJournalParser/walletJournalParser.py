@@ -98,9 +98,11 @@ class WalletJournalParser:
         for doc in documents:
             # relevant refTypeIDs
             # 1 Player Trading
+            # 10 Player Donation
+            # 37 Corp Account Withdrawal
             # 46 Broker Fee
             # 54 Sales Tax
-            if doc['refTypeId'] in [1, 46, 54]:
+            if doc['refTypeId'] in [1, 10, 37, 46, 54]:
                 result.append(doc)
         return result
 
