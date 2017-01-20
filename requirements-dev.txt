@@ -1,2 +1,4 @@
 coverage
 zappa
+eveapimongo
+grequests
