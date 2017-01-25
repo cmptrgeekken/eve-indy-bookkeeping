@@ -105,3 +105,6 @@ class IndustryJobsParser:
     def write(self, documents):
         cursor = MongoProvider().cursor('industryJobs')
         cursor.insert_many(documents)
+
+if __name__ == '__main__':
+    IndustryJobsParser().main()

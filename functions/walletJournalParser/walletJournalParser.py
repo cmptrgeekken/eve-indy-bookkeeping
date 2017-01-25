@@ -118,3 +118,6 @@ class WalletJournalParser:
     def write(self, documents):
         cursor = MongoProvider().cursor('walletJournal')
         cursor.insert_many(documents)
+
+if __name__ == '__main__':
+    WalletJournalParser().main()

@@ -7,7 +7,6 @@ def lambda_handler(event, context):
     WalletTransactionsParser().main()
     return "done"
 
-
 class WalletTransactionsParser:
     def main(self):
         apis = self.load_apis()
@@ -106,3 +105,6 @@ class WalletTransactionsParser:
     def write(self, documents):
         cursor = MongoProvider().cursor('walletTransactions')
         cursor.insert_many(documents)
+
+if __name__ == '__main__':
+    WalletTransactionsParser().main()
