@@ -3,6 +3,7 @@ import xml.etree.ElementTree
 import grequests
 from eveapimongo import MongoProvider
 from pprint import pprint
+import re
 
 
 def lambda_handler(event, context):
@@ -18,7 +19,7 @@ class ExternalProvider:
         return result
 
     def get_parallel_api_results(self, urls):
-        rs = (grequests.get(u) for u in urls)
+        rs = (grequests.get(u['url']) for u in urls)
         result = grequests.map(rs)
         return result
 
@@ -37,7 +38,9 @@ class ContractsParser:
         self.write(contracts)
 
     def write(self, documents):
-        pass
+        if len(documents) > 0:
+            cursor = MongoProvider().cursor('contracts')
+            cursor.insert_many(documents)
 
     def get_contracts(self, apis):
         urls = self.build_contract_urls(apis)
@@ -49,11 +52,12 @@ class ContractsParser:
     def create_dict_with_apis_and_responses(self, responses, apis):
         result = {}
         for response in responses:
-            url = response.url
+            api_key_pattern = re.compile("keyID=(?P<keyID>\d+)")
+            api_v_code_pattern = re.compile("vCode=(?P<vCode>[^&]+)")
+            response_api_key = api_key_pattern.search(response.url).group("keyID")
+            response_api_v_code = api_v_code_pattern.search(response.url).group("vCode")
             for api in apis:
-                key = api['key']
-                v_code = api['vCode']
-                if str(key) in url and v_code in url:
+                if int(api['key']) == int(response_api_key) and api['vCode'] == response_api_v_code:
                     api_id = api['_id']
                     result[api_id] = response
                     break
@@ -87,28 +91,63 @@ class ContractsParser:
     def transform_contract_response_to_contracts(self, response):
         rows = self.get_rows(response.text)
         result = []
+
+        if rows is None:
+            return result
+
         for row in rows:
             result.append(self.create_contract_from_row(row))
         return result
 
     def create_contract_from_row(self, row):
         return {
-            'numDays': int(row.get('numDays')),
+            'contractId': int(row.get('contractID')),
+            # Contract Types:
+            # ItemExchange
+            # Courier
+            # Loan
+            # Auction
             'type': row.get('type'),
+            'issuerId': int(row.get('issuerID')),
+            'issuerCorpId': int(row.get('issuerCorpID')),
             'assigneeId': int(row.get('assigneeID')),
             'acceptorId': int(row.get('acceptorID')),
-            'price': float(row.get('price')),
             'volume': float(row.get('volume')),
+            'startStationId': int(row.get('startStationID')),
+            'forCorp': int(row.get('forCorp')) == 1,
+            # Public
+            # Private
+            'availability': row.get('availability'),
             'endStationId': int(row.get('endStationID')),
+            'dateIssued': row.get('dateIssued'),
+            'dateExpired': row.get('dateExpired'),
+            'dateAccepted': row.get('dateAccepted'),
             'dateCompleted': row.get('dateCompleted'),
+            'numDays': int(row.get('numDays')),
+            # Outstanding
+            # Deleted
+            # Completed
+            # Failed
+            # CompletedByIssuer
+            # CompletedByContractor
+            # Cancelled
+            # Rejected
+            # Reversed
+            # InProgress
             'status': row.get('status'),
             'title': row.get('title'),
+            'price': float(row.get('price')),
             'reward': float(row.get('reward')),
-            'contractId': int(row.get('contractID'))
+            'collateral': float(row.get('collateral')),
+            'buyout': float(row.get('buyout')),
         }
 
     def get_rows(self, xml_string):
-        e = xml.etree.ElementTree.fromstring(xml_string)
+        try:
+            e = xml.etree.ElementTree.fromstring(xml_string)
+        except xml.etree.ElementTree.ParseError:
+            return None
+
         xml_result = e[1]
 
         if xml_result.tag == 'error':
@@ -150,6 +189,18 @@ class ContractsParser:
             api = self.find_api_by_id(api_id, apis)
             contracts = apis_with_contracts[api_id]
             for contract in contracts:
+                existing_contract = MongoProvider().cursor('contracts').find_one({'contractId': contract['contractId']})
+
+                # Cannot view items in a Courier Contract
+                if contract['type'] == 'Courier':
+                    continue
+
+                # Do not update existing contract items to save on web requests
+                if existing_contract is not None\
+                        and existing_contract['items'] is not None\
+                        and len(existing_contract['items']) > 0:
+                    continue
+
                 contract_id = contract['contractId']
                 result.append(self.build_contract_items_url(api, contract_id))
         return result
@@ -165,10 +216,22 @@ class ContractsParser:
 
     def parse_items(self, response_text):
         items = []
-        for row in self.get_rows(response_text):
+
+        rows = self.get_rows(response_text)
+
+        if rows is None:
+            return []
+
+        for row in rows:
             items.append({
+                'recordId': int(row.get('recordID')),
+                'typeId': int(row.get('typeID')),
                 'quantity': int(row.get('quantity')),
-                'typeId': int(row.get('typeID'))
+                # -1: Singleton or BPO
+                # -2: BPC
+                'rawQuantity': int(row.get('rawQuantity')) if row.get('rawQuantity') is not None else 0,
+                'singleton': int(row.get('singleton')) == 1,
+                'included': int(row.get('included')) == 1,
             })
         aggregated = self.aggregate_items(items)
         return aggregated
