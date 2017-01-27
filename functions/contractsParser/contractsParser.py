@@ -2,9 +2,7 @@ import xml.etree.ElementTree
 
 import grequests
 from eveapimongo import MongoProvider
-from pprint import pprint
 import re
-
 
 def lambda_handler(event, context):
     ContractsParser().main()
@@ -19,10 +17,9 @@ class ExternalProvider:
         return result
 
     def get_parallel_api_results(self, urls):
-        rs = (grequests.get(u['url']) for u in urls)
-        result = grequests.map(rs)
+        rs = (grequests.get(u['url'], timeout=10) for u in urls)
+        result = grequests.imap(rs)
         return result
-
 
 class ContractsParser:
     base_url = "https://api.eveonline.com"
@@ -40,7 +37,16 @@ class ContractsParser:
     def write(self, documents):
         if len(documents) > 0:
             cursor = MongoProvider().cursor('contracts')
-            cursor.insert_many(documents)
+            for document in documents:
+                existing_document = cursor.find_one({'contractId': document['contractId']})
+                if existing_document is not None:
+                    # Preserve existing items, as we don't pull them in again.
+                    if 'items' in existing_document:
+                        document['items'] = existing_document['items']
+
+                    cursor.update({'contractId': document['contractId']}, document)
+                else:
+                    cursor.insert(document)
 
     def get_contracts(self, apis):
         urls = self.build_contract_urls(apis)
@@ -172,6 +178,8 @@ class ContractsParser:
         urls = self.build_contract_items_urls(apis_with_contracts, apis)
         api_response = self.external_provider.get_parallel_api_results(urls)
         for response in api_response:
+            if response is None:
+                continue
             items = self.parse_items(response.text)
             contract = self.find_contract_for_url(response.url, apis_with_contracts, apis)
             contract['items'] = items
@@ -189,15 +197,15 @@ class ContractsParser:
             api = self.find_api_by_id(api_id, apis)
             contracts = apis_with_contracts[api_id]
             for contract in contracts:
-                existing_contract = MongoProvider().cursor('contracts').find_one({'contractId': contract['contractId']})
-
                 # Cannot view items in a Courier Contract
                 if contract['type'] == 'Courier':
                     continue
 
+                existing_contract = MongoProvider().cursor('contracts').find_one({'contractId': contract['contractId']})
+
                 # Do not update existing contract items to save on web requests
                 if existing_contract is not None\
-                        and existing_contract['items'] is not None\
+                        and 'items' in existing_contract\
                         and len(existing_contract['items']) > 0:
                     continue
 

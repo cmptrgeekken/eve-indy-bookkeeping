@@ -102,8 +102,8 @@ class WalletJournalParser:
             # 37 Corp Account Withdrawal
             # 46 Broker Fee
             # 54 Sales Tax
-            # 56 Manufacturing
-            if doc['refTypeId'] in [1, 10, 37, 46, 54, 56]:
+            # 56 Manufacturing (Ignored, tracked in industryJobsParser)
+            if doc['refTypeId'] in [1, 10, 37, 46, 54]:
                 result.append(doc)
         return result
 

@@ -16,8 +16,7 @@ class AssetsParser:
         self.apis = self.load_apis()
         api_results = self.get_api_results(self.apis)
         transformed = self.transform(api_results)
-        filtered = self.filter_irrelevant(transformed)
-        self.write(filtered)
+        self.write(transformed)
 
     def load_apis(self):
         result = []
@@ -57,16 +56,10 @@ class AssetsParser:
         urls = []
         for api in apis:
             query = "keyID=%d&vCode=%s&flat=%d" % (api['key'], api['vCode'], 1)
-            if api['type'] == 'corp':
-                endpoint = "/corp/AssetList.xml.aspx"
-                endpoint_url = base_url + endpoint
-                api_url = endpoint_url + "?" + query
-                urls.append({'apiId': api['_id'], 'url': api_url})
-            else:
-                endpoint = "/char/AssetList.xml.aspx"
-                endpoint_url = base_url + endpoint
-                api_url = endpoint_url + "?" + query
-                urls.append({'apiId': api['_id'], 'url': api_url})
+            endpoint = "/%s/AssetList.xml.aspx" % api['type']
+            endpoint_url = base_url + endpoint
+            api_url = endpoint_url + "?" + query
+            urls.append({'apiId': api['_id'], 'url': api_url})
         return urls
 
     def transform(self, api_results):
@@ -99,31 +92,15 @@ class AssetsParser:
 
         return result
 
-    def filter_irrelevant_and_existing(self, documents):
-        without_irrelevant = self.filter_irrelevant(documents)
-        return self.filter_existing(without_irrelevant)
-
-    def filter_irrelevant(self, documents):
-        result = []
-        for doc in documents:
-            result.append(doc)
-        return result
-
-    def filter_existing(self, documents):
-        result = []
-        for document in documents:
-            found = MongoProvider().find_one('assetList', {'itemId': document['itemId']})
-            # if it doesn't exist
-            if found is None:
-                result.append(document)
-        return result
-
     def write(self, documents):
         cursor = MongoProvider().cursor('assetList')
 
+        api_ids = []
         # Delete existing assets
         for api in self.apis:
-            cursor.delete_many({'apiId': api['_id']})
+            api_ids.append(api['_id'])
+
+        cursor.delete_many({'apiId': {'$in': api_ids}})
 
         cursor.insert_many(documents)
 
