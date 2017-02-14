@@ -1,291 +1,168 @@
-import xml.etree.ElementTree
-
-import grequests
+import evelink.api
+import evelink.char
+import evelink.eve
 from eveapimongo import MongoProvider
-import re
-
-def lambda_handler(event, context):
-    ContractsParser().main()
-    return "done"
+from functions.baseParser.baseParser import BaseParser
 
 
-class ExternalProvider:
-    def get_apis(self):
-        result = []
-        for api in MongoProvider().find('apis'):
-            result.append(api)
-        return result
+class ContractsParser(BaseParser):
+    contract_cursor = MongoProvider().cursor('contracts')
 
-    def get_parallel_api_results(self, urls):
-        rs = (grequests.get(u['url'], timeout=10) for u in urls)
-        result = grequests.imap(rs)
-        return result
+    def import_contracts(self):
+        messages = []
+        for api in self.apis:
+            eve_api = evelink.api.API(api_key=(int(api['key']), api['vCode']))
+            corp = evelink.corp.Corp(api=eve_api)
+            api_contracts = corp.contracts()
 
-class ContractsParser:
-    base_url = "https://api.eveonline.com"
-    contract_endpoint = "Contracts.xml.aspx"
-    contract_items_endpoint = "ContractItems.xml.aspx"
-    external_provider = ExternalProvider()
+            '''
+            contract = {
+                'id': int(a['contractID']),
+                'issuer': int(a['issuerID']),
+                'issuer_corp': int(a['issuerCorpID']),
+                'assignee': int(a['assigneeID']),
+                'acceptor': int(a['acceptorID']),
+                'start': int(a['startStationID']),
+                'end': int(a['endStationID']),
+                'type': a['type'],
+                'status': a['status'],
+                'corp': a['forCorp'] == '1',
+                'availability': a['availability'],
+                'issued': api.parse_ts(a['dateIssued']),
+                'days': int(a['numDays']),
+                'price': float(a['price']),
+                'reward': float(a['reward']),
+                'collateral': float(a['collateral']),
+                'buyout': float(a['buyout']),
+                'volume': float(a['volume']),
+                'title': a['title'],
+                'expired': api.parse_ts(a['dateExpired'])
+                'accepted': api.parse_ts(a['dateAccepted']),
+                'completed': api.parse_ts(a['dateCompleted'])
+            }
+            '''
 
-    def main(self):
-        apis = self.external_provider.get_apis()
-        apis_with_contracts = self.get_contracts(apis)
-        apis_with_contracts_and_items = self.extend_contracts_with_items(apis_with_contracts, apis)
-        contracts = self.merge_api_into_contract(apis_with_contracts_and_items)
-        self.write(contracts)
+            idx = 0
 
-    def write(self, documents):
-        if len(documents) > 0:
-            cursor = MongoProvider().cursor('contracts')
-            for document in documents:
-                existing_document = cursor.find_one({'contractId': document['contractId']})
-                if existing_document is not None:
-                    # Preserve existing items, as we don't pull them in again.
-                    if 'items' in existing_document:
-                        document['items'] = existing_document['items']
+            for contract_id in api_contracts.result:
+                idx+=1
 
-                    cursor.update({'contractId': document['contractId']}, document)
+                # if idx % 10 == 0:
+                #    print('%d/%d' % (idx, len(api_contracts.result)))
+
+                contract = api_contracts.result[contract_id]
+                existing_contract = self.contract_cursor.find_one({'id': contract['id']})
+
+                if (existing_contract is None
+                        or 'contract_items' not in existing_contract) \
+                    and contract['type'] != 'Courier':
+
+                    try:
+                        api_contract_items = corp.contract_items(contract_id=contract['id'])
+
+                        contract_items = []
+
+                        for contract_item in api_contract_items.result:
+                            item = self.find_item(contract_item['type_id'])
+
+                            contract_item['type_name'] = item.typeName
+
+                            contract_items.append(contract_item)
+                        contract['contract_items'] = contract_items
+                    except Exception:
+                        continue
+
+                if contract['start'] > 0 and 'start_location' not in contract:
+                    contract['start_location'] = self.find_location(contract['start'])
+                if contract['end'] > 0 and 'end_location' not in contract:
+                    contract['end_location'] = self.find_location(contract['end'])
+
+                if contract['acceptor'] > 0 and 'acceptor_char' not in contract:
+                    contract['acceptor_name'] = self.find_char_or_corp(contract['acceptor'], eve_api)
+
+                if contract['assignee'] > 0 and 'assignee_name' not in contract:
+                    contract['assignee_name'] = self.find_char_or_corp(contract['assignee'], eve_api)
+
+                if contract['issuer'] > 0 and 'issuer_name' not in contract:
+                    contract['issuer_name'] = self.find_char(contract['issuer'])
+
+                if contract['issuer_corp'] > 0 and 'issuer_corp_name' not in contract:
+                    contract['issuer_corp_name'] = self.find_corp(contract['issuer_corp'], eve_api)
+
+                if contract['issuer_corp'] == api['corpId']:
+                    contract['is_issuer'] = True
                 else:
-                    cursor.insert(document)
+                    contract['is_issuer'] = False
 
-    def get_contracts(self, apis):
-        urls = self.build_contract_urls(apis)
-        responses = self.external_provider.get_parallel_api_results(urls)
-        apis_with_responses = self.create_dict_with_apis_and_responses(responses, apis)
-        apis_with_contracts = self.transform_contract_responses_to_contracts(apis_with_responses)
-        return apis_with_contracts
+                message = self.write(contract, api['_id'])
+                if message is not None:
+                    messages.append(message)
 
-    def create_dict_with_apis_and_responses(self, responses, apis):
-        result = {}
-        for response in responses:
-            api_key_pattern = re.compile("keyID=(?P<keyID>\d+)")
-            api_v_code_pattern = re.compile("vCode=(?P<vCode>[^&]+)")
-            response_api_key = api_key_pattern.search(response.url).group("keyID")
-            response_api_v_code = api_v_code_pattern.search(response.url).group("vCode")
-            for api in apis:
-                if int(api['key']) == int(response_api_key) and api['vCode'] == response_api_v_code:
-                    api_id = api['_id']
-                    result[api_id] = response
-                    break
-        return result
+        return messages
 
-    def build_contract_urls(self, apis):
-        urls = []
-        for api in apis:
-            verification = self.build_api_verifications(api)
-            # type can be corp or char
-            api_type = "/%s/" % api['type']
-            url = self.base_url + api_type + self.contract_endpoint + "?" + verification
-            urls.append({'apiId': api['_id'], 'url': url})
-        return urls
+    def summarize_fuel(self, active):
+        search_filter = {'contract_items': {'$elemMatch': {'type_name': {'$regex': '/.*Fuel Block/'}}},
+                         'status': 'Outstanding' if active else 'Completed'}
+        contracts = self.contract_cursor.find(search_filter)
 
-    def build_api_verifications(self, api):
-        key = api['key']
-        v_code = api['vCode']
-        return "keyID=%d&vCode=%s" % (key, v_code)
+        return contracts
 
-    def transform_contract_responses_to_contracts(self, responses):
-        result = {}
-        for apiId in responses:
-            contracts = self.transform_contract_response_to_contracts(responses[apiId])
-            entry_value = []
-            for contract in contracts:
-                entry_value.append(contract)
-            result[apiId] = entry_value
-        return result
+    def write(self, contract, api_id):
+        contract['api_id'] = api_id
+        existing_contract = self.contract_cursor.find_one({'id': contract['id']})
 
-    def transform_contract_response_to_contracts(self, response):
-        rows = self.get_rows(response.text)
-        result = []
+        if existing_contract is None:
+            '''TODO: Trigger event'''
+            message = None
 
-        if rows is None:
-            return result
-
-        for row in rows:
-            result.append(self.create_contract_from_row(row))
-        return result
-
-    def create_contract_from_row(self, row):
-        return {
-            'contractId': int(row.get('contractID')),
-            # Contract Types:
-            # ItemExchange
-            # Courier
-            # Loan
-            # Auction
-            'type': row.get('type'),
-            'issuerId': int(row.get('issuerID')),
-            'issuerCorpId': int(row.get('issuerCorpID')),
-            'assigneeId': int(row.get('assigneeID')),
-            'acceptorId': int(row.get('acceptorID')),
-            'volume': float(row.get('volume')),
-            'startStationId': int(row.get('startStationID')),
-            'forCorp': int(row.get('forCorp')) == 1,
-            # Public
-            # Private
-            'availability': row.get('availability'),
-            'endStationId': int(row.get('endStationID')),
-            'dateIssued': row.get('dateIssued'),
-            'dateExpired': row.get('dateExpired'),
-            'dateAccepted': row.get('dateAccepted'),
-            'dateCompleted': row.get('dateCompleted'),
-            'numDays': int(row.get('numDays')),
-            # Outstanding
-            # Deleted
-            # Completed
-            # Failed
-            # CompletedByIssuer
-            # CompletedByContractor
-            # Cancelled
-            # Rejected
-            # Reversed
-            # InProgress
-            'status': row.get('status'),
-            'title': row.get('title'),
-            'price': float(row.get('price')),
-            'reward': float(row.get('reward')),
-            'collateral': float(row.get('collateral')),
-            'buyout': float(row.get('buyout')),
-        }
-
-    def get_rows(self, xml_string):
-        try:
-            e = xml.etree.ElementTree.fromstring(xml_string)
-        except xml.etree.ElementTree.ParseError:
-            return None
-
-        xml_result = e[1]
-
-        if xml_result.tag == 'error':
-            print("ERROR: " + xml_result.text)
-            return None
-
-        result = []
-        for row in xml_result[0]:
-            result.append(row)
-        return result
-
-    def merge_api_into_contract(self, apis_with_contracts):
-        result = []
-        for api_id in apis_with_contracts:
-            contracts = apis_with_contracts[api_id]
-            for contract in contracts:
-                contract['apiId'] = api_id
-                result.append(contract)
-        return result
-
-    def extend_contracts_with_items(self, apis_with_contracts, apis):
-        urls = self.build_contract_items_urls(apis_with_contracts, apis)
-        api_response = self.external_provider.get_parallel_api_results(urls)
-        for response in api_response:
-            if response is None:
-                continue
-            items = self.parse_items(response.text)
-            contract = self.find_contract_for_url(response.url, apis_with_contracts, apis)
-            contract['items'] = items
-        return apis_with_contracts
-
-    def find_api_by_id(self, api_id, apis):
-        for api in apis:
-            if api['_id'] == api_id:
-                return api
-        return None
-
-    def build_contract_items_urls(self, apis_with_contracts, apis):
-        result = []
-        for api_id in apis_with_contracts:
-            api = self.find_api_by_id(api_id, apis)
-            contracts = apis_with_contracts[api_id]
-            for contract in contracts:
-                # Cannot view items in a Courier Contract
+            if not contract['is_issuer'] \
+                    and contract['status'] == 'Outstanding':
                 if contract['type'] == 'Courier':
-                    continue
+                    message = 'New Courier Contract by **%s** from **%s** to **%s** (%d m3, %s Collateral, %s Reward)' \
+                              % (contract['issuer_name'],
+                                 contract['start_location']['station_name'],
+                                 contract['end_location']['station_name'],
+                                 contract['volume'],
+                                 '{:,.0f}'.format(contract['collateral']),
+                                 '{:,.0f}'.format(contract['reward']))
+                elif contract['price'] > 0:
+                    message = 'New **%s** Contract by **%s** at **%s** (Price: %s)' \
+                        % (contract['type'],
+                           contract['issuer_name'],
+                           contract['start_location']['station_name'],
+                           '{:,.0f}'.format(contract['price']))
+                elif contract['reward'] > 0:
+                    message = 'New **%s** Contract by **%s** at **%s** (Reward: %s)' \
+                          % (contract['type'],
+                             contract['issuer_name'],
+                             contract['start_location']['station_name'],
+                             '{:,.0f}'.format(contract['reward']))
 
-                existing_contract = MongoProvider().cursor('contracts').find_one({'contractId': contract['contractId']})
+                if 'contract_items' in contract:
+                    for item in contract['contract_items']:
+                        message += '\r\n  * %d %s (%s)' % (item['quantity'],
+                                                         item['type_name'],
+                                                         item['action'])
 
-                # Do not update existing contract items to save on web requests
-                if existing_contract is not None\
-                        and 'items' in existing_contract\
-                        and len(existing_contract['items']) > 0:
-                    continue
+            self.contract_cursor.insert(contract)
 
-                contract_id = contract['contractId']
-                result.append(self.build_contract_items_url(api, contract_id))
-        return result
+            if message is not None:
+                print(message)
 
-    def build_contract_items_url(self, api, contract_id):
-        url = 'https://api.eveonline.com/corp/ContractItems.xml.aspx?keyID=%d&vCode=%s&contractID=%d' \
-              % (api['key'], api['vCode'], contract_id)
-        return {
-            'apiId': api['_id'],
-            'contractId': contract_id,
-            'url': url
-        }
+            return message
 
-    def parse_items(self, response_text):
-        items = []
+        elif existing_contract['status'] != contract['status']\
+            or ('contract_items' in contract and 'contract_items' not in existing_contract)\
+            or set(existing_contract.keys()) != set(contract.keys()):
 
-        rows = self.get_rows(response_text)
+            if existing_contract['status'] != contract['status']:
+                '''TODO: Trigger event'''
+                print("Status changed!")
 
-        if rows is None:
-            return []
+            existing_contract.update(contract)
 
-        for row in rows:
-            items.append({
-                'recordId': int(row.get('recordID')),
-                'typeId': int(row.get('typeID')),
-                'quantity': int(row.get('quantity')),
-                # -1: Singleton or BPO
-                # -2: BPC
-                'rawQuantity': int(row.get('rawQuantity')) if row.get('rawQuantity') is not None else 0,
-                'singleton': int(row.get('singleton')) == 1,
-                'included': int(row.get('included')) == 1,
-            })
-        aggregated = self.aggregate_items(items)
-        return aggregated
-
-    def aggregate_items(self, items):
-        result = []
-        for item in items:
-            existing_item = self.find_item_by_type_id(item['typeId'], result)
-            if existing_item is None:
-                result.append(item)
-            else:
-                existing_item['quantity'] += item['quantity']
-        return result
-
-    def find_item_by_type_id(self, type_id, items):
-        for item in items:
-            if type_id == item['typeId']:
-                return item
-        return None
-
-    def find_contract_for_url(self, url, apis_with_contracts, apis):
-        api = self.find_api_from_url(url, apis)
-        contract_id = self.get_contract_id_from_url(url)
-        for api_id in apis_with_contracts:
-            try:
-                contracts_for_api = apis_with_contracts[api_id]
-                result = self.find_by_contract_id(contract_id, contracts_for_api)
-                return result
-            except KeyError:
-                continue
-
-    def find_api_from_url(self, url, apis):
-        for api in apis:
-            if str(api['key']) in url and api['vCode'] in url:
-                return api
-        return None
-
-    def get_contract_id_from_url(self, url):
-        return int(url.split('contractID=')[1])
-
-    def find_by_contract_id(self, contract_id, contracts):
-        for contract in contracts:
-            if contract['contractId'] == contract_id:
-                return contract
-        return None
-
+            self.contract_cursor.remove({'id': contract['id']})
+            self.contract_cursor.insert(existing_contract)
 
 if __name__ == '__main__':
-    ContractsParser().main()
+    ContractsParser().import_contracts()

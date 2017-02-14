@@ -2,3 +2,5 @@ coverage
 zappa
 eveapimongo
 grequests
+evelink>=0.7.5
+discord.py
